@@ -101,6 +101,7 @@ private:
 	void EnterAiControl();
 	void TrackThrottleHold();
 	LegoS32 DetectAnalogDevice();
+	LegoBool32 IsBoundButtonPressed(LegoU32 p_slot) const;
 
 	Racer* m_racer;     // 0x000
 	InputState m_input; // 0x004

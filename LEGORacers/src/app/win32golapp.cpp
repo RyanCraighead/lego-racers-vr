@@ -18,6 +18,7 @@
 #include <miniwin/miniwinapp.h>
 #include <miniwin/touch.h>
 #include <mmsystem.h>
+#include <racers_vr.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -140,6 +141,9 @@ void Win32GolApp::ShutdownDisplay()
 void Win32GolApp::Destroy()
 {
 	m_golBackendType = c_golBackendDP;
+	// [library:openxr] Tear down while the WGL context used to create the XR
+	// session is still current and alive. The call is idempotent.
+	RacersVr_ShutdownSession();
 	ShutdownDisplay();
 
 	if (m_hWnd) {
@@ -458,6 +462,24 @@ void Win32GolApp::UpdateMousePosition()
 LegoS32 Win32GolApp::Tick(GolAppEventHandler* p_eventHandler)
 {
 	m_eventHandler = p_eventHandler;
+
+	// [library:openxr] Action state is sampled on the game thread. Translate the
+	// pause action through the existing SDL/DirectInput route so keyboard and XR
+	// behavior stay additive.
+	RacersVr_PollEventsAndActions();
+	if (RacersVr_ConsumePausePressed()) {
+		for (int pressed = 1; pressed >= 0; pressed--) {
+			SDL_Event pauseEvent;
+			SDL_zero(pauseEvent);
+			pauseEvent.type = pressed ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+			pauseEvent.key.scancode = SDL_SCANCODE_ESCAPE;
+			pauseEvent.key.key = SDLK_ESCAPE;
+			pauseEvent.key.down = pressed != 0;
+			pauseEvent.key.repeat = false;
+			MiniwinApp_PushEvent(pauseEvent);
+		}
+	}
+
 	// While a finger owns the menu cursor, the real-mouse re-assert would yank the
 	// cursor away between a tap's press and release; the finger position is applied
 	// after the drain below instead.
@@ -471,6 +493,12 @@ LegoS32 Win32GolApp::Tick(GolAppEventHandler* p_eventHandler)
 	SDL_Event event;
 	do {
 		while (MiniwinApp_PollEvent(event)) {
+			if (event.type == SDL_EVENT_KEY_DOWN && event.key.scancode == SDL_SCANCODE_F12 && !event.key.repeat) {
+				// [library:openxr] F12 is a desktop-accessible recenter fallback; the
+				// key remains visible to the original input path.
+				RacersVr_RequestRecenter();
+			}
+
 			// Alt+Enter toggles fullscreen and must not leak into the game's input
 			// layer (Enter doubles as the menu click).
 			if (event.type == SDL_EVENT_KEY_DOWN && event.key.key == SDLK_RETURN && (event.key.mod & SDL_KMOD_ALT)) {
@@ -556,6 +584,13 @@ LegoS32 Win32GolApp::Tick(GolAppEventHandler* p_eventHandler)
 				break;
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
 				// WM_ACTIVATEAPP(FALSE) equivalent.
+				// [library:openxr] The companion window can lose desktop focus to the
+				// compositor before or during XR initialization. Do not enter the legacy
+				// blocking/minimized loop: initialization, events, and frame cadence must
+				// keep advancing on this game thread.
+				if (RacersVr_IsRequested()) {
+					break;
+				}
 				if ((m_flags & c_flagDisplayActive) && !m_disabled) {
 					OutputDebugString("Deactivate App\n");
 					OnAppDeactivated();

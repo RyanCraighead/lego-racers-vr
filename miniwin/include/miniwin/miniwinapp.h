@@ -76,6 +76,9 @@ enum MiniwinBackendId {
 };
 void MiniwinSetBackend(MiniwinBackendId p_backend);
 MiniwinBackendId MiniwinGetBackend();
+// Request a core OpenGL context version for a run that needs more than the
+// renderer's default 3.3. The value is shared across the EXE/DLL miniwin copies.
+void MiniwinSetOpenGLContextVersion(int p_major, int p_minor);
 
 // Maps a --renderer name to an id ("sdlgpu"/"gpu"; "opengl3"/"opengl"/"gl";
 // "opengles3"/"gles3"/"gles"/"webgl2"). Returns false on an unknown name (the caller

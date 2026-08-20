@@ -21,6 +21,7 @@
 #include <miniwin/miniwinapp.h>
 #include <miniwin/touch.h>
 #include <objbase.h>
+#include <racers_vr.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -108,6 +109,9 @@ static void DisplayArgumentHelp()
 	SDL_Log("  --scale <mode>       fullscreen scaling: letterbox (default) or stretch");
 	SDL_Log("  --resolution <mode>  render at native (default) or original (640x480) resolution");
 	SDL_Log("  --renderer <name>    render backend: sdlgpu (default), opengl3, or opengles3");
+	SDL_Log("  --openxr             enable the optional OpenXR stereo/6DOF race view (--vr alias)");
+	SDL_Log("  --vr-world-scale <n> game units per meter (default 10)");
+	SDL_Log("  --vr-seated-height <n> upward anchor offset in meters (default 0)");
 	SDL_Log("  --help               show this help");
 	SDL_Log("Original game options (passed through):");
 	SDL_Log("  -novideo -window -horzres <n> -vertres <n>");
@@ -160,6 +164,43 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 		}
 		if (SDL_strcmp(argv[i], "--language") == 0 && i + 1 < argc) {
 			MiniwinSetRegistryLangId((DWORD) SDL_atoi(argv[i + 1]));
+			i++;
+			continue;
+		}
+		if (SDL_strcmp(argv[i], "--openxr") == 0 || SDL_strcmp(argv[i], "--vr") == 0) {
+			if (!RacersVr_IsCompiled()) {
+				SDL_LogError(
+					SDL_LOG_CATEGORY_APPLICATION,
+					"%s requested, but this build was configured without -DRACERS_OPENXR=ON",
+					argv[i]
+				);
+				return SDL_APP_FAILURE;
+			}
+			RacersVr_SetRequested(true);
+			continue;
+		}
+		if (SDL_strcmp(argv[i], "--vr-world-scale") == 0 && i + 1 < argc) {
+			char* end = nullptr;
+			float worldScale = strtof(argv[i + 1], &end);
+			if (end == argv[i + 1] || *end || !(worldScale > 0.0f) || worldScale > 1000.0f) {
+				SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "--vr-world-scale: expected a value in (0, 1000]");
+				return SDL_APP_FAILURE;
+			}
+			RacersVr_SetWorldScale(worldScale);
+			i++;
+			continue;
+		}
+		if (SDL_strcmp(argv[i], "--vr-seated-height") == 0 && i + 1 < argc) {
+			char* end = nullptr;
+			float seatedHeight = strtof(argv[i + 1], &end);
+			if (end == argv[i + 1] || *end || !(seatedHeight >= -3.0f && seatedHeight <= 3.0f)) {
+				SDL_LogError(
+					SDL_LOG_CATEGORY_APPLICATION,
+					"--vr-seated-height: expected an anchor offset in [-3, 3] meters"
+				);
+				return SDL_APP_FAILURE;
+			}
+			RacersVr_SetSeatedHeight(seatedHeight);
 			i++;
 			continue;
 		}
@@ -251,6 +292,20 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 		if (MiniwinBackendLoadPref(&saved)) {
 			MiniwinSetBackend(saved);
 		}
+	}
+
+	// [library:openxr] The first native XR path shares the game's existing WGL
+	// context. Request a modern core context for common Windows runtime minimums;
+	// the renderer itself remains GLSL 3.3 and desktop runs keep their 3.3 default.
+	if (RacersVr_IsRequested()) {
+		if (MiniwinGetBackend() != MINIWIN_BACKEND_OPENGL3) {
+			SDL_LogWarn(
+				SDL_LOG_CATEGORY_APPLICATION,
+				"OpenXR mode requires opengl3; overriding the renderer for this run"
+			);
+			MiniwinSetBackend(MINIWIN_BACKEND_OPENGL3);
+		}
+		MiniwinSetOpenGLContextVersion(4, 5);
 	}
 
 #ifdef __EMSCRIPTEN__

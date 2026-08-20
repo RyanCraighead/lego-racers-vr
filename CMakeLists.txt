@@ -52,6 +52,7 @@ if (MINGW)
 endif()
 
 option(RACERS_BUILD_APP "Build LEGORacers application" ON)
+option(RACERS_OPENXR "Build the optional Windows OpenXR VR foundation" OFF)
 option(RACERS_ASAN "Enable Address Sanitizer" OFF)
 option(RACERS_UBSAN "Enable Undefined Behavior Sanitizer" OFF)
 option(RACERS_WERROR "Treat warnings as errors" OFF)
@@ -109,6 +110,7 @@ endif()
 
 add_subdirectory(3rdparty)
 add_subdirectory(miniwin)
+add_subdirectory(vr)
 
 # --- Decompiled game code ---
 #
@@ -186,7 +188,9 @@ if (RACERS_BUILD_APP)
     "${PROJECT_SOURCE_DIR}/util"
     "${PROJECT_SOURCE_DIR}/GolDP/include"
   )
-  target_link_libraries(legoracers PRIVATE goldp miniwin indeo5 SDL3::SDL3)
+  # Keep the optional OpenXR process state in LEGORacers.exe only. GolDP and
+  # miniwin must not receive another copy of the static racers_vr library.
+  target_link_libraries(legoracers PRIVATE goldp miniwin indeo5 racers_vr SDL3::SDL3)
 
   # The decomp headers use MSVC-isms (calling conventions, #pragma warning) that
   # compat.h neutralizes; not every header includes it, so inject it up front for

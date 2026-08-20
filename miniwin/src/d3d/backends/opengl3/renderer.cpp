@@ -167,8 +167,9 @@ bool MiniwinGl3_Available()
 
 Uint32 MiniwinGl3_PrepareWindowFlags()
 {
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
-	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, 3);
+	Sint64 requestedVersion = SDL_GetNumberProperty(SDL_GetGlobalProperties(), "racers.miniwin.opengl.version", 303);
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, (int) (requestedVersion / 100));
+	SDL_GL_SetAttribute(SDL_GL_CONTEXT_MINOR_VERSION, (int) (requestedVersion % 100));
 	SDL_GL_SetAttribute(SDL_GL_CONTEXT_PROFILE_MASK, SDL_GL_CONTEXT_PROFILE_CORE);
 	SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
 	SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);

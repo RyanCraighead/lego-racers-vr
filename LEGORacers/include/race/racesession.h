@@ -190,6 +190,7 @@ private:
 	void UpdateFinishedState();
 	void UpdateResultsState();
 	void UpdateHuds();
+	LegoBool32 DrawOpenXR();
 	void Draw();
 	void DrawRacerViewportForState1(Racer* p_racer);
 	void DrawRacerViewportForState2(Racer* p_racer);

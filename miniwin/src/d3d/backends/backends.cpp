@@ -35,6 +35,11 @@ static MiniwinBackendId g_activeBackend = MINIWIN_BACKEND_OPENGLES3;
 #endif
 static bool g_resolved;
 static MiniwinBackendId g_resolvedBackend;
+// miniwin is linked into both LEGORacers.exe and GolDP.dll on desktop. SDL's
+// global property store is process-wide, so it carries the selected backend
+// across those otherwise-independent static-library copies.
+static const char* c_backendProperty = "racers.miniwin.backend";
+static const char* c_openGLVersionProperty = "racers.miniwin.opengl.version";
 
 // Set per backend when its window/context could not be created this session, so the
 // fallback chain treats it as unavailable from then on.
@@ -44,6 +49,14 @@ void MiniwinSetBackend(MiniwinBackendId p_backend)
 {
 	g_activeBackend = p_backend;
 	g_resolved = false;
+	SDL_SetNumberProperty(SDL_GetGlobalProperties(), c_backendProperty, (Sint64) p_backend + 1);
+}
+
+void MiniwinSetOpenGLContextVersion(int p_major, int p_minor)
+{
+	if (p_major >= 3 && p_minor >= 0 && p_minor < 100) {
+		SDL_SetNumberProperty(SDL_GetGlobalProperties(), c_openGLVersionProperty, p_major * 100 + p_minor);
+	}
 }
 
 MiniwinBackendId MiniwinGetBackend()
@@ -172,6 +185,12 @@ static MiniwinBackendId ResolveBackend()
 {
 	if (g_resolved) {
 		return g_resolvedBackend;
+	}
+
+	Sint64 sharedBackend = SDL_GetNumberProperty(SDL_GetGlobalProperties(), c_backendProperty, 0);
+	if (sharedBackend >= (Sint64) MINIWIN_BACKEND_SDLGPU + 1 &&
+		sharedBackend <= (Sint64) MINIWIN_BACKEND_OPENGLES3 + 1) {
+		g_activeBackend = (MiniwinBackendId) (sharedBackend - 1);
 	}
 
 	MiniwinBackendId resolved = g_activeBackend;

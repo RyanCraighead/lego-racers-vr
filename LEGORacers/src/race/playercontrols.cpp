@@ -6,6 +6,7 @@
 #include "race/racer/racer.h"
 
 #include <miniwin/touch.h>
+#include <racers_vr.h>
 #include <string.h>
 
 DECOMP_SIZE_ASSERT(PlayerControls, 0x74)
@@ -57,6 +58,8 @@ void PlayerControls::Destroy()
 	// [library:input] Touch ownership is released with its player (idempotent;
 	// Destroy runs from both RaceSession::DestroyInput and the destructor).
 	MiniwinTouch_ReleasePlayer(this);
+	// [library:openxr] Ownership mirrors touch and is likewise idempotent.
+	RacersVr_ReleasePlayer(this);
 
 	m_input.Destroy();
 
@@ -79,6 +82,8 @@ void PlayerControls::Initialize(Racer* p_racer, InputDevice::Callback* p_fallbac
 	// [library:input] The first player initialized each session owns touch input
 	// (player 0; the session setup loop initializes players in index order).
 	MiniwinTouch_ClaimPlayer(this);
+	// [library:openxr] The first local player owns motion-controller race input.
+	RacersVr_ClaimPlayer(this);
 }
 
 // FUNCTION: LEGORACERS 0x00430100
@@ -166,6 +171,13 @@ void PlayerControls::UpdateSteering(LegoU32 p_elapsedMs)
 		float touchSteer;
 		if (MiniwinTouch_GetSteer(this, &touchSteer)) {
 			analogValue = touchSteer;
+		}
+
+		// [library:openxr] Motion-controller thumbstick steering is another
+		// optional analog source; keyboard/gamepad bindings remain unchanged.
+		float vrSteer;
+		if (RacersVr_GetSteer(this, &vrSteer) && vrSteer * vrSteer > analogValue * analogValue) {
+			analogValue = vrSteer;
 		}
 
 		if (analogValue > 0.0f) {
@@ -329,6 +341,35 @@ void PlayerControls::Update(LegoU32 p_elapsedMs)
 				(this->*handlers[i])(TRUE);
 			}
 			if (touchReleased & (1u << i)) {
+				(this->*handlers[i])(FALSE);
+			}
+		}
+	}
+
+	// [library:openxr] Apply motion-controller button edges through the same
+	// PlayerControls handlers used by keyboard/gamepad/touch.
+	uint32_t vrPressed;
+	uint32_t vrReleased;
+	if (RacersVr_PollRaceButtons(
+			this,
+			m_input.m_enabled && !(m_input.m_stateFlags & c_stateAiControl),
+			&vrPressed,
+			&vrReleased
+		)) {
+		void (PlayerControls::* const handlers[])(LegoBool32) = {
+			&PlayerControls::OnThrottle,
+			&PlayerControls::OnBrake,
+			&PlayerControls::OnUsePowerup,
+		};
+		for (LegoU32 i = 0; i < sizeOfArray(handlers); i++) {
+			LegoU32 inputFlag = 1u << (i + 2);
+			if ((vrPressed & (1u << i)) && !(m_input.m_inputFlags & inputFlag)) {
+				(this->*handlers[i])(TRUE);
+			}
+			// Treat XR and the configured keyboard/gamepad binding as an OR. An
+			// XR release must not cancel the same action while its desktop binding
+			// remains physically held.
+			if ((vrReleased & (1u << i)) && !IsBoundButtonPressed(i + 2)) {
 				(this->*handlers[i])(FALSE);
 			}
 		}
@@ -532,6 +573,44 @@ LegoS32 PlayerControls::DetectAnalogDevice()
 	return result;
 }
 
+// [library:openxr] Resolve the configured logical binding back to its physical
+// button/axis-button state. This keeps XR button releases additive with remapped
+// keyboard and gamepad controls without changing the decompiled object layout.
+LegoBool32 PlayerControls::IsBoundButtonPressed(LegoU32 p_slot) const
+{
+	if (p_slot >= c_inputSlotCount) {
+		return FALSE;
+	}
+
+	DirectInputDevice* source = m_input.m_devices[p_slot];
+	LegoU32 binding = m_input.m_inputs[p_slot];
+	if (!source) {
+		return FALSE;
+	}
+
+	LegoU32 sourceKind = InputDevice::GetKeySource(binding);
+	LegoU32 target = binding & InputDevice::c_keyCodeMask;
+	undefined2* mapping = NULL;
+	LegoS32 count = 0;
+	if (sourceKind == InputDevice::c_sourceKeyboard || sourceKind == InputDevice::c_sourceMouse ||
+		sourceKind == InputDevice::c_sourceJoystickButton) {
+		mapping = source->GetCustomButtonMapping();
+		count = source->GetButtonCountFast();
+	}
+	else if (sourceKind == InputDevice::c_sourceJoystickAxisButton) {
+		mapping = source->GetCustomAxisMapping();
+		count = source->GetAxisCount() * 2;
+	}
+
+	for (LegoS32 index = 0; index < count; index++) {
+		LegoU32 logical = mapping ? mapping[index] : index;
+		if (logical == target && source->GetButtonState(sourceKind | index)) {
+			return TRUE;
+		}
+	}
+	return FALSE;
+}
+
 // FUNCTION: LEGORACERS 0x00430840
 PlayerControls::InputState::InputState()
 {
@@ -640,13 +719,21 @@ InputDevice::Callback::ResultValue PlayerControls::InputState::OnKeyDown(
 					m_controls->OnSteerRight(TRUE);
 					return TRUE;
 				case 2:
-					m_controls->OnThrottle(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_THROTTLE) ||
+						!(m_inputFlags & PlayerControls::c_inputFlagThrottle)) {
+						m_controls->OnThrottle(TRUE);
+					}
 					return TRUE;
 				case 3:
-					m_controls->OnBrake(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_BRAKE) ||
+						!(m_inputFlags & PlayerControls::c_inputFlagBrake)) {
+						m_controls->OnBrake(TRUE);
+					}
 					return TRUE;
 				case 4:
-					m_controls->OnUsePowerup(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_POWERUP) || !(m_inputFlags & 0x10)) {
+						m_controls->OnUsePowerup(TRUE);
+					}
 					return TRUE;
 				case 5:
 					m_controls->OnCycleCamera(TRUE);
@@ -692,13 +779,19 @@ InputDevice::Callback::ResultValue PlayerControls::InputState::OnKeyUp(
 					m_controls->OnSteerRight(FALSE);
 					return TRUE;
 				case 2:
-					m_controls->OnThrottle(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_THROTTLE)) {
+						m_controls->OnThrottle(FALSE);
+					}
 					return TRUE;
 				case 3:
-					m_controls->OnBrake(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_BRAKE)) {
+						m_controls->OnBrake(FALSE);
+					}
 					return TRUE;
 				case 4:
-					m_controls->OnUsePowerup(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_POWERUP)) {
+						m_controls->OnUsePowerup(FALSE);
+					}
 					return TRUE;
 				case 5:
 					m_controls->OnCycleCamera(FALSE);

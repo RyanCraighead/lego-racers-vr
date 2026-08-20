@@ -34,9 +34,11 @@
 #include "surface/golrendertarget.h"
 #include "world/golworlddatabase.h"
 
+#include <math.h>
 #include <memory.h>
 #include <miniwin/touch.h>
 #include <mmsystem.h>
+#include <racers_vr.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -70,6 +72,35 @@ const LegoFloat g_viewportRects[4] = {0.5f, 0.01f, 0.49f, 0.49f};
 // GLOBAL: LEGORACERS 0x004bee74
 const LegoU16 g_pauseMenuStringIds[16] =
 	{0x0e, 0x0f, 0x11, 0x14, 0x0e, 0x10, 0x11, 0x00, 0x12, 0x13, 0x15, 0x16, 0x17, 0x18, 0x2c, 0x00};
+
+// [library:openxr] Rotate an OpenXR-space vector by its view quaternion. The
+// conversion into the game's +Z-forward camera basis happens at the call site.
+static GolVec3 RotateOpenXRVector(const float* p_quaternion, LegoFloat p_x, LegoFloat p_y, LegoFloat p_z)
+{
+	LegoFloat tx = 2.0f * (p_quaternion[1] * p_z - p_quaternion[2] * p_y);
+	LegoFloat ty = 2.0f * (p_quaternion[2] * p_x - p_quaternion[0] * p_z);
+	LegoFloat tz = 2.0f * (p_quaternion[0] * p_y - p_quaternion[1] * p_x);
+
+	GolVec3 result;
+	result.m_x = p_x + p_quaternion[3] * tx + (p_quaternion[1] * tz - p_quaternion[2] * ty);
+	result.m_y = p_y + p_quaternion[3] * ty + (p_quaternion[2] * tx - p_quaternion[0] * tz);
+	result.m_z = p_z + p_quaternion[3] * tz + (p_quaternion[0] * ty - p_quaternion[1] * tx);
+	return result;
+}
+
+// [library:openxr] OpenXR uses +Y up/-Z forward. GolCamera's local basis uses
+// +Y screen-down/+Z forward, so both vertical and depth axes change sign.
+static GolVec3 OpenXRToCameraVector(GolTransform* p_anchor, const GolVec3& p_vector)
+{
+	GolVec3 local;
+	local.m_x = p_vector.m_x;
+	local.m_y = -p_vector.m_y;
+	local.m_z = -p_vector.m_z;
+
+	GolVec3 world;
+	p_anchor->TransformVector(&local, &world);
+	return world;
+}
 
 // FUNCTION: LEGORACERS 0x004316e0
 RaceSession::RaceSession()
@@ -441,7 +472,9 @@ void RaceSession::Run()
 			}
 
 			Update();
-			Draw();
+			if (!DrawOpenXR()) {
+				Draw();
+			}
 			m_golApp->PresentFrame();
 
 			if (m_frameCount) {
@@ -463,6 +496,9 @@ void RaceSession::Run()
 		}
 	}
 
+	// [library:openxr] A race owns the XR session. End it before renderer
+	// teardown and lazily create a fresh session for a later race.
+	RacersVr_ShutdownSession();
 	m_renderer->VTable0xf4();
 	m_renderer->VTable0x38();
 	m_renderer->VTable0x48();
@@ -1503,6 +1539,8 @@ void RaceSession::InitializeInput()
 	// [library:input] Touch stands down for the whole session when it has more than
 	// one local player (Versus split screen — touch could only drive player one).
 	MiniwinTouch_SetLocalPlayerCount(playerCount);
+	// [library:openxr] The first vertical slice is single-player only.
+	RacersVr_SetLocalPlayerCount(playerCount);
 
 	if (playerCount > 0) {
 		PlayerControls* controls = session->m_playerControls;
@@ -2108,6 +2146,127 @@ void RaceSession::Update()
 			UpdateHuds();
 		}
 	}
+}
+
+// [library:openxr] Replay only the world pass for each runtime-provided view.
+// HUD/menu overlays remain on the desktop compositor until the floating-quad
+// UI stage; replaying Draw() itself would consume one-shot overlay state twice.
+LegoBool32 RaceSession::DrawOpenXR()
+{
+	if (!RacersVr_IsRequested() || m_demoMode || m_splitScreen || m_context->m_playerCount != 1) {
+		return FALSE;
+	}
+
+	RacersVrFrame frame;
+	RacersVrFrameResult frameResult = RacersVr_BeginFrame(&frame);
+	if (frameResult == RACERS_VR_FRAME_UNAVAILABLE) {
+		return FALSE;
+	}
+	if (frameResult == RACERS_VR_FRAME_SKIP) {
+		RacersVr_EndFrame();
+		return TRUE;
+	}
+	if (frame.view_count != 2 || m_powerupManager.GetExclusiveDraw() || !m_cameras[0]) {
+		RacersVr_EndFrame();
+		return FALSE;
+	}
+
+	GolCamera* camera = m_cameras[0];
+	GolTransform anchor;
+	anchor.CopyFrom(camera->m_transform);
+	GolVec4 savedViewBounds = camera->m_viewBounds;
+	LegoFloat savedNearClip = camera->m_nearClip;
+	LegoFloat savedFarClip = camera->m_farClip;
+	LegoU32 savedFlags = camera->m_flags;
+
+	m_raceState.UpdateShadows(camera);
+	LegoBool32 renderedStereo = TRUE;
+	for (LegoU32 eyeIndex = 0; eyeIndex < frame.view_count; eyeIndex++) {
+		if (!RacersVr_BeginEye(eyeIndex)) {
+			renderedStereo = FALSE;
+			break;
+		}
+
+		const RacersVrView& view = frame.views[eyeIndex];
+		camera->m_transform->CopyFrom(&anchor);
+
+		GolVec3 xrForward = RotateOpenXRVector(view.pose.orientation, 0.0f, 0.0f, -1.0f);
+		// GolCamera's stored vertical basis points toward screen-down, so map the
+		// headset's down vector into the second SetDirectionUp argument.
+		GolVec3 xrDown = RotateOpenXRVector(view.pose.orientation, 0.0f, -1.0f, 0.0f);
+		GolVec3 direction = OpenXRToCameraVector(&anchor, xrForward);
+		GolVec3 down = OpenXRToCameraVector(&anchor, xrDown);
+		camera->m_transform->SetDirectionUp(&direction, &down);
+
+		GolVec3 xrPosition;
+		xrPosition.m_x = view.pose.position[0];
+		xrPosition.m_y = view.pose.position[1];
+		xrPosition.m_z = view.pose.position[2];
+		GolVec3 positionOffset = OpenXRToCameraVector(&anchor, xrPosition);
+		GolVec3 position;
+		anchor.GetPosition(&position);
+		position += positionOffset;
+		camera->m_transform->SetPosition(&position);
+
+		LegoFloat nearClip = 0.05f * RacersVr_GetWorldScale();
+		if (nearClip < 0.01f) {
+			nearClip = 0.01f;
+		}
+		camera->m_nearClip = nearClip;
+		camera->m_farClip = savedFarClip > nearClip ? savedFarClip : nearClip + 100.0f;
+
+		GolVec4 bounds;
+		bounds.m_x = nearClip * tanf(view.fov.angle_left);
+		bounds.m_y = -nearClip * tanf(view.fov.angle_up);
+		bounds.m_z = nearClip * tanf(view.fov.angle_right);
+		bounds.m_u = -nearClip * tanf(view.fov.angle_down);
+		camera->SetViewBounds(&bounds);
+		camera->m_flags |= GolCameraBase::c_flagViewDirty | GolCameraBase::c_flagProjectionDirty;
+
+		m_renderer->SetCamera(camera);
+		m_renderer->BeginFrame(FALSE);
+		m_renderer->SelectViewport(FALSE);
+
+		if (m_raceState.m_playerRacers[0]->m_flags & Racer::c_flagGhost) {
+			m_powerupManager.Draw(1);
+		}
+		else {
+			m_skyState.SetPosition(&position);
+			switch (m_state) {
+			case 1:
+				DrawRacerViewportForState1(m_raceState.m_playerRacers[0]);
+				break;
+			case 2:
+				DrawRacerViewportForState2(m_raceState.m_playerRacers[0]);
+				break;
+			case 3:
+				DrawRacerViewportForState3(m_raceState.m_playerRacers[0]);
+				break;
+			case 4:
+				DrawRacerViewportForState4(m_raceState.m_playerRacers[0]);
+				break;
+			case 5:
+				DrawRacerViewportForState5(m_raceState.m_playerRacers[0]);
+				break;
+			}
+		}
+
+		m_renderer->EndFrame();
+		RacersVr_EndEye(eyeIndex);
+	}
+
+	camera->m_transform->CopyFrom(&anchor);
+	camera->m_viewBounds = savedViewBounds;
+	camera->m_nearClip = savedNearClip;
+	camera->m_farClip = savedFarClip;
+	camera->m_flags = savedFlags | GolCameraBase::c_flagViewDirty | GolCameraBase::c_flagProjectionDirty;
+	GolVec3 anchorPosition;
+	anchor.GetPosition(&anchorPosition);
+	m_skyState.SetPosition(&anchorPosition);
+	m_renderer->SetCamera(camera);
+	m_renderer->ApplyCamera();
+	RacersVr_EndFrame();
+	return renderedStereo;
 }
 
 // FUNCTION: LEGORACERS 0x004354d0
