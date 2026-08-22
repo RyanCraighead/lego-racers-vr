@@ -3,6 +3,8 @@
 #include "decomp.h"
 #include "input/directinputdevice.h"
 
+#include <racers_vr.h>
+
 DECOMP_SIZE_ASSERT(RaceForceFeedback, 0x28)
 
 // GLOBAL: LEGORACERS 0x004b0174
@@ -180,6 +182,9 @@ void RaceForceFeedback::SetSurfaceIntensity(LegoFloat p_intensity)
 // FUNCTION: LEGORACERS 0x00422030
 void RaceForceFeedback::PlayTurboRumble(LegoU32 p_level)
 {
+	LegoFloat vrAmplitude = 0.35f + 0.15f * static_cast<LegoFloat>(p_level < 4 ? p_level : 3);
+	RacersVr_PulseHaptics(RACERS_VR_HAND_LEFT | RACERS_VR_HAND_RIGHT, vrAmplitude, 0.25f, 0.0f);
+
 	LegoU32 zero = 0;
 
 	if (m_device) {
@@ -213,6 +218,7 @@ void RaceForceFeedback::PlayTurboRumble(LegoU32 p_level)
 // FUNCTION: LEGORACERS 0x004220c0
 void RaceForceFeedback::PlayReactionRumble()
 {
+	RacersVr_PulseHaptics(RACERS_VR_HAND_LEFT | RACERS_VR_HAND_RIGHT, 0.65f, 0.18f, 0.0f);
 	if (m_device) {
 		m_offMs = 0;
 		m_totalMs = 500;
@@ -224,6 +230,7 @@ void RaceForceFeedback::PlayReactionRumble()
 // FUNCTION: LEGORACERS 0x004220e0
 void RaceForceFeedback::PlayLightRumble()
 {
+	RacersVr_PulseHaptics(RACERS_VR_HAND_LEFT | RACERS_VR_HAND_RIGHT, 0.30f, 0.08f, 0.0f);
 	if (m_device) {
 		m_offMs = 0;
 		m_totalMs = 150;
@@ -235,6 +242,7 @@ void RaceForceFeedback::PlayLightRumble()
 // FUNCTION: LEGORACERS 0x00422100
 void RaceForceFeedback::PlayScrapeRumble()
 {
+	RacersVr_PulseHaptics(RACERS_VR_HAND_LEFT | RACERS_VR_HAND_RIGHT, 0.20f, 0.06f, 0.0f);
 	if (m_device && !m_state) {
 		m_offMs = 0;
 		m_totalMs = 100;

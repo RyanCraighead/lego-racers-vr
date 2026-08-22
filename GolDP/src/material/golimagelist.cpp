@@ -86,9 +86,9 @@ void GolImageList::LoadImageDefinitions(GolD3DRenderDevice* p_renderer, const Le
 
 		GolImage* item = GetItem(i);
 
-		FourBytes name[2];
-		strncpy(&name[0].m_bytes[0], parser->ReadStringWithMaxLength(sizeof(name)), sizeof(name));
-		AddName(&name[0].m_bytes[0], item);
+		GolName name;
+		strncpy(name, parser->ReadStringWithMaxLength(sizeof(name)), sizeof(name));
+		AddName(name, item);
 
 		parser->ReadLeftCurly();
 
@@ -133,8 +133,7 @@ void GolImageList::LoadImageDefinitions(GolD3DRenderDevice* p_renderer, const Le
 			token = parser->GetNextToken();
 		}
 
-		item->m_name[0] = name[0];
-		item->m_name[1] = name[1];
+		::memcpy(item->m_name, name, sizeof(name));
 
 		if (p_renderer->VTable0x110()) {
 			flags = flags | GolTexture::c_textureFlagBit6;

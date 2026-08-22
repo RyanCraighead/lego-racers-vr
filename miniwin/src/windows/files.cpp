@@ -218,7 +218,28 @@ HANDLE CreateFile(
 		mode = "rb";
 	}
 
-	SDL_IOStream* stream = SDL_IOFromFile(resolved, mode);
+	const char* openPath = resolved;
+#if defined(SDL_PLATFORM_ANDROID)
+	// SDL interprets relative paths as internal-storage/APK asset paths on Android.
+	// The game chdirs into its external game-data directory, so make that cwd-based
+	// path absolute before handing streamed TUN files to SDL_IOFromFile.
+	char absolutePath[1024];
+	if (resolved[0] != '/') {
+		char* currentDirectory = SDL_GetCurrentDirectory();
+		if (!currentDirectory) {
+			return INVALID_HANDLE_VALUE;
+		}
+
+		int length = SDL_snprintf(absolutePath, sizeof(absolutePath), "%s%s", currentDirectory, resolved);
+		SDL_free(currentDirectory);
+		if (length < 0 || (size_t) length >= sizeof(absolutePath)) {
+			return INVALID_HANDLE_VALUE;
+		}
+		openPath = absolutePath;
+	}
+#endif
+
+	SDL_IOStream* stream = SDL_IOFromFile(openPath, mode);
 	if (!stream) {
 		return INVALID_HANDLE_VALUE;
 	}

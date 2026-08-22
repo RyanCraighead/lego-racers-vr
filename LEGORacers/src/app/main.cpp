@@ -294,10 +294,18 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 		}
 	}
 
-	// [library:openxr] The first native XR path shares the game's existing WGL
-	// context. Request a modern core context for common Windows runtime minimums;
-	// the renderer itself remains GLSL 3.3 and desktop runs keep their 3.3 default.
+	// [library:openxr] Quest presents through an OpenGL ES swapchain. The desktop
+	// path keeps its WGL/OpenGL 4.5 context for Windows runtime compatibility.
 	if (RacersVr_IsRequested()) {
+#if defined(RACERS_QUEST)
+		if (MiniwinGetBackend() != MINIWIN_BACKEND_OPENGLES3) {
+			SDL_LogWarn(
+				SDL_LOG_CATEGORY_APPLICATION,
+				"Quest OpenXR mode requires opengles3; overriding the renderer for this run"
+			);
+			MiniwinSetBackend(MINIWIN_BACKEND_OPENGLES3);
+		}
+#else
 		if (MiniwinGetBackend() != MINIWIN_BACKEND_OPENGL3) {
 			SDL_LogWarn(
 				SDL_LOG_CATEGORY_APPLICATION,
@@ -306,6 +314,7 @@ SDL_AppResult SDL_AppInit(void** appstate, int argc, char** argv)
 			MiniwinSetBackend(MINIWIN_BACKEND_OPENGL3);
 		}
 		MiniwinSetOpenGLContextVersion(4, 5);
+#endif
 	}
 
 #ifdef __EMSCRIPTEN__

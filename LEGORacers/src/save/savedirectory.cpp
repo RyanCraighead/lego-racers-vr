@@ -3,6 +3,8 @@
 #include "golerror.h"
 #include "golstream.h"
 
+#include <miniwin/windows.h>
+
 #include <direct.h>
 #include <errno.h>
 #include <io.h>
@@ -153,7 +155,9 @@ LegoS32 SaveSlot::CheckFileExists(const LegoChar* p_fileName)
 LegoS32 SaveSlot::RemoveFile(const LegoChar* p_fileName)
 {
 	BuildFilePath(p_fileName, g_saveFileName);
-	if (::remove(g_saveFileName) < 0) {
+	LegoChar resolvedPath[sizeof(g_saveFileName)];
+	MiniwinResolvePath(g_saveFileName, resolvedPath, sizeof(resolvedPath));
+	if (::remove(resolvedPath) < 0) {
 		if (errno == ENOENT) {
 			return GolStream::e_ioFileNotFound;
 		}

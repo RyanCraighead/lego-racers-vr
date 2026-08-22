@@ -31,6 +31,7 @@
 #include "race/hazards/hazardcontext.h"
 #include "race/timeracemanager.h"
 #include "render/gold3drenderdevice.h"
+#include "render/goldrawstate.h"
 #include "surface/golrendertarget.h"
 #include "world/golworlddatabase.h"
 
@@ -428,6 +429,9 @@ void RaceSession::Run()
 	m_renderer->VTable0x44();
 
 	while (m_running) {
+#if defined(RACERS_QUEST)
+		RacersVr_SetMenuInputActive(m_pauseState != 0);
+#endif
 		if (!m_golApp->Tick(this)) {
 			break;
 		}
@@ -496,9 +500,15 @@ void RaceSession::Run()
 		}
 	}
 
-	// [library:openxr] A race owns the XR session. End it before renderer
-	// teardown and lazily create a fresh session for a later race.
+#if defined(RACERS_QUEST)
+	RacersVr_SetMenuInputActive(false);
+#endif
+
+	// [library:openxr] Desktop keeps race-scoped sessions. Quest keeps one
+	// app-wide session until Win32GolApp destroys the renderer and activity.
+#if !defined(RACERS_QUEST)
 	RacersVr_ShutdownSession();
+#endif
 	m_renderer->VTable0xf4();
 	m_renderer->VTable0x38();
 	m_renderer->VTable0x48();
@@ -2265,6 +2275,38 @@ LegoBool32 RaceSession::DrawOpenXR()
 	m_skyState.SetPosition(&anchorPosition);
 	m_renderer->SetCamera(camera);
 	m_renderer->ApplyCamera();
+#if defined(RACERS_QUEST)
+	if (renderedStereo) {
+		GolDrawState* drawState = m_golApp->GetDrawState();
+		uint32_t hudWidth = drawState && drawState->m_width > 0 ? static_cast<uint32_t>(drawState->m_width) : 640u;
+		uint32_t hudHeight = drawState && drawState->m_height > 0 ? static_cast<uint32_t>(drawState->m_height) : 480u;
+		if (RacersVr_BeginHud(hudWidth, hudHeight)) {
+			m_renderer->BeginFrame(FALSE);
+			m_renderer->SelectViewport(FALSE);
+			m_renderer->DisableZBuffer(FALSE);
+			switch (m_state) {
+			case 1:
+				DrawOverlaysForState1();
+				break;
+			case 2:
+				DrawOverlaysForState2();
+				break;
+			case 3:
+				DrawOverlaysForState3();
+				break;
+			case 4:
+				DrawOverlaysForState4();
+				break;
+			case 5:
+				DrawOverlaysForState5();
+				break;
+			}
+			m_renderer->EnableZBuffer();
+			FlushOverlays();
+			RacersVr_EndHud();
+		}
+	}
+#endif
 	RacersVr_EndFrame();
 	return renderedStereo;
 }

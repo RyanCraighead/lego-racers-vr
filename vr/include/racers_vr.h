@@ -18,6 +18,19 @@ extern "C"
 		RACERS_VR_RACE_THROTTLE = 1u << 0,
 		RACERS_VR_RACE_BRAKE = 1u << 1,
 		RACERS_VR_RACE_POWERUP = 1u << 2,
+		RACERS_VR_RACE_DRIFT = 1u << 3,
+		RACERS_VR_RACE_LOOK_BACK = 1u << 4,
+		RACERS_VR_RACE_CYCLE_CAMERA = 1u << 5,
+		RACERS_VR_RACE_CYCLE_HUD = 1u << 6,
+	};
+
+	enum RacersVrMenuCommand {
+		RACERS_VR_MENU_UP = 1u << 0,
+		RACERS_VR_MENU_DOWN = 1u << 1,
+		RACERS_VR_MENU_LEFT = 1u << 2,
+		RACERS_VR_MENU_RIGHT = 1u << 3,
+		RACERS_VR_MENU_SELECT = 1u << 4,
+		RACERS_VR_MENU_BACK = 1u << 5,
 	};
 
 	enum RacersVrHand {
@@ -69,6 +82,8 @@ extern "C"
 	// Call once per game tick. Before lazy initialization this is a harmless no-op.
 	void RacersVr_PollEventsAndActions(void);
 	bool RacersVr_ConsumePausePressed(void);
+	uint32_t RacersVr_ConsumeMenuCommands(void);
+	void RacersVr_SetMenuInputActive(bool active);
 	void RacersVr_RequestRecenter(void);
 
 	// Additive player input. Ownership follows the existing touch-input contract.
@@ -79,7 +94,10 @@ extern "C"
 	bool RacersVr_IsRaceButtonHeld(void* owner, uint32_t button);
 	bool RacersVr_PollRaceButtons(void* owner, bool gate, uint32_t* pressed, uint32_t* released);
 
-	// BeginFrame lazily initializes OpenXR once the existing WGL context is current.
+	// Present a completed flat GLES framebuffer as the runtime's head-locked menu layer.
+	bool RacersVr_PresentFlatFrame(uint32_t source_framebuffer, uint32_t source_width, uint32_t source_height);
+
+	// BeginFrame lazily initializes OpenXR once the platform graphics context is current.
 	// RACERS_VR_FRAME_SKIP still starts an OpenXR frame and must be balanced by EndFrame.
 	enum RacersVrFrameResult RacersVr_BeginFrame(RacersVrFrame* frame);
 
@@ -88,6 +106,8 @@ extern "C"
 	// renders that eye before EndEye releases the image. Render both indices 0 and 1.
 	bool RacersVr_BeginEye(uint32_t view_index);
 	void RacersVr_EndEye(uint32_t view_index);
+	bool RacersVr_BeginHud(uint32_t width, uint32_t height);
+	void RacersVr_EndHud(void);
 	bool RacersVr_EndFrame(void);
 
 	// Optional output action. hands is a RacersVrHand bit mask; duration is seconds.

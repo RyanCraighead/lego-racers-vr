@@ -347,7 +347,24 @@ void PlayerControls::Update(LegoU32 p_elapsedMs)
 	}
 
 	// [library:openxr] Apply motion-controller button edges through the same
-	// PlayerControls handlers used by keyboard/gamepad/touch.
+	// PlayerControls handlers used by keyboard/gamepad/touch. Each entry keeps
+	// its engine binding slot and input flag explicit because XR bit order differs.
+	struct VrRaceButtonMapping {
+		LegoU32 button;
+		LegoU32 bindingSlot;
+		LegoU32 inputFlag;
+		void (PlayerControls::*handler)(LegoBool32);
+	};
+	static const VrRaceButtonMapping vrButtons[] = {
+		{RACERS_VR_RACE_THROTTLE, 2, 0x4, &PlayerControls::OnThrottle},
+		{RACERS_VR_RACE_BRAKE, 3, 0x8, &PlayerControls::OnBrake},
+		{RACERS_VR_RACE_POWERUP, 4, 0x10, &PlayerControls::OnUsePowerup},
+		{RACERS_VR_RACE_DRIFT, 7, 0x80, &PlayerControls::OnDrift},
+		{RACERS_VR_RACE_LOOK_BACK, 8, 0x100, &PlayerControls::OnLookBack},
+		{RACERS_VR_RACE_CYCLE_CAMERA, 5, 0x20, &PlayerControls::OnCycleCamera},
+		{RACERS_VR_RACE_CYCLE_HUD, 6, 0x40, &PlayerControls::OnCycleHud},
+	};
+
 	uint32_t vrPressed;
 	uint32_t vrReleased;
 	if (RacersVr_PollRaceButtons(
@@ -356,21 +373,15 @@ void PlayerControls::Update(LegoU32 p_elapsedMs)
 			&vrPressed,
 			&vrReleased
 		)) {
-		void (PlayerControls::* const handlers[])(LegoBool32) = {
-			&PlayerControls::OnThrottle,
-			&PlayerControls::OnBrake,
-			&PlayerControls::OnUsePowerup,
-		};
-		for (LegoU32 i = 0; i < sizeOfArray(handlers); i++) {
-			LegoU32 inputFlag = 1u << (i + 2);
-			if ((vrPressed & (1u << i)) && !(m_input.m_inputFlags & inputFlag)) {
-				(this->*handlers[i])(TRUE);
+		for (const VrRaceButtonMapping& vrButton : vrButtons) {
+			if ((vrPressed & vrButton.button) && !(m_input.m_inputFlags & vrButton.inputFlag)) {
+				(this->*vrButton.handler)(TRUE);
 			}
 			// Treat XR and the configured keyboard/gamepad binding as an OR. An
 			// XR release must not cancel the same action while its desktop binding
 			// remains physically held.
-			if ((vrReleased & (1u << i)) && !IsBoundButtonPressed(i + 2)) {
-				(this->*handlers[i])(FALSE);
+			if ((vrReleased & vrButton.button) && !IsBoundButtonPressed(vrButton.bindingSlot)) {
+				(this->*vrButton.handler)(FALSE);
 			}
 		}
 	}
@@ -736,16 +747,28 @@ InputDevice::Callback::ResultValue PlayerControls::InputState::OnKeyDown(
 					}
 					return TRUE;
 				case 5:
-					m_controls->OnCycleCamera(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_CYCLE_CAMERA) ||
+						!(m_inputFlags & 0x20)) {
+						m_controls->OnCycleCamera(TRUE);
+					}
 					return TRUE;
 				case 6:
-					m_controls->OnCycleHud(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_CYCLE_HUD) ||
+						!(m_inputFlags & 0x40)) {
+						m_controls->OnCycleHud(TRUE);
+					}
 					return TRUE;
 				case 7:
-					m_controls->OnDrift(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_DRIFT) ||
+						!(m_inputFlags & 0x80)) {
+						m_controls->OnDrift(TRUE);
+					}
 					return TRUE;
 				case 8:
-					m_controls->OnLookBack(TRUE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_LOOK_BACK) ||
+						!(m_inputFlags & 0x100)) {
+						m_controls->OnLookBack(TRUE);
+					}
 					return TRUE;
 				}
 			}
@@ -794,16 +817,24 @@ InputDevice::Callback::ResultValue PlayerControls::InputState::OnKeyUp(
 					}
 					return TRUE;
 				case 5:
-					m_controls->OnCycleCamera(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_CYCLE_CAMERA)) {
+						m_controls->OnCycleCamera(FALSE);
+					}
 					return TRUE;
 				case 6:
-					m_controls->OnCycleHud(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_CYCLE_HUD)) {
+						m_controls->OnCycleHud(FALSE);
+					}
 					return TRUE;
 				case 7:
-					m_controls->OnDrift(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_DRIFT)) {
+						m_controls->OnDrift(FALSE);
+					}
 					return TRUE;
 				case 8:
-					m_controls->OnLookBack(FALSE);
+					if (!RacersVr_IsRaceButtonHeld(m_controls, RACERS_VR_RACE_LOOK_BACK)) {
+						m_controls->OnLookBack(FALSE);
+					}
 					return TRUE;
 				}
 			}

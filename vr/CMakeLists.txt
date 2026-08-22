@@ -4,10 +4,25 @@ target_include_directories(racers_vr PUBLIC "${CMAKE_CURRENT_SOURCE_DIR}/include
 target_link_libraries(racers_vr PRIVATE SDL3::SDL3)
 
 if(RACERS_OPENXR)
-  if(NOT WIN32)
-    message(FATAL_ERROR "RACERS_OPENXR currently requires desktop Windows and OpenGL 3.3")
-  endif()
+  if(ANDROID)
+    if(NOT DEFINED QUEST_RACERS_ROOT OR QUEST_RACERS_ROOT STREQUAL "")
+      message(FATAL_ERROR "QUEST_RACERS_ROOT is required for the Android OpenXR implementation")
+    endif()
+    if(NOT EXISTS "${QUEST_RACERS_ROOT}/native/racers_vr_openxr_android.cpp")
+      message(FATAL_ERROR "Missing ${QUEST_RACERS_ROOT}/native/racers_vr_openxr_android.cpp")
+    endif()
 
+    # The OpenXR Android AAR exposes this imported target through Prefab.
+    find_package(OpenXR REQUIRED CONFIG)
+    target_sources(racers_vr PRIVATE
+      "${QUEST_RACERS_ROOT}/native/racers_vr_openxr_android.cpp"
+    )
+    target_compile_definitions(racers_vr PRIVATE
+      XR_USE_PLATFORM_ANDROID
+      XR_USE_GRAPHICS_API_OPENGL_ES
+    )
+    target_link_libraries(racers_vr PRIVATE OpenXR::openxr_loader EGL GLESv3 log android)
+  elseif(WIN32)
   # Keep the loader reproducible and independent of any machine-wide OpenXR SDK.
   set(BUILD_API_LAYERS OFF CACHE BOOL "Build OpenXR API layers" FORCE)
   set(BUILD_CONFORMANCE_TESTS OFF CACHE BOOL "Build OpenXR conformance tests" FORCE)
@@ -35,6 +50,9 @@ if(RACERS_OPENXR)
   target_sources(racers_vr PRIVATE src/racers_vr_openxr.cpp)
   target_compile_definitions(racers_vr PRIVATE XR_USE_GRAPHICS_API_OPENGL XR_USE_PLATFORM_WIN32)
   target_link_libraries(racers_vr PRIVATE ${RACERS_OPENXR_LOADER_TARGET} opengl32)
+  else()
+    message(FATAL_ERROR "RACERS_OPENXR requires Android/OpenGL ES or desktop Windows/OpenGL")
+  endif()
 else()
   target_sources(racers_vr PRIVATE src/racers_vr_stub.cpp)
 endif()

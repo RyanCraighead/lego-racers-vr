@@ -91,9 +91,9 @@ void GolFontLibrary::LoadFontDefinitions(
 
 		GolFontBase* font = GetItem(i);
 
-		FourBytes name[2];
-		::strncpy(&name[0].m_bytes[0], parser->ReadStringWithMaxLength(sizeof(name)), sizeof(name));
-		AddName(&name[0].m_bytes[0], font);
+		GolName name;
+		::strncpy(name, parser->ReadStringWithMaxLength(sizeof(name)), sizeof(name));
+		AddName(name, font);
 
 		parser->ReadLeftCurly();
 
@@ -154,9 +154,8 @@ void GolFontLibrary::LoadFontDefinitions(
 			token = parser->GetNextToken();
 		}
 
-		font->m_nameParts[0] = name[0];
 		LegoU16 flags = (LegoU16) style.m_flags;
-		font->m_nameParts[1] = name[1];
+		::memcpy(font->m_nameParts, name, sizeof(name));
 		font->m_colorPacked = style.m_textColorPacked;
 		font->m_flags = flags;
 

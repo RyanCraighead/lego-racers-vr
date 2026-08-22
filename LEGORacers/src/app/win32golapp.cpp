@@ -464,9 +464,40 @@ LegoS32 Win32GolApp::Tick(GolAppEventHandler* p_eventHandler)
 	m_eventHandler = p_eventHandler;
 
 	// [library:openxr] Action state is sampled on the game thread. Translate the
-	// pause action through the existing SDL/DirectInput route so keyboard and XR
-	// behavior stay additive.
+	// menu and pause actions through the existing SDL/DirectInput route so keyboard
+	// and XR behavior stay additive.
 	RacersVr_PollEventsAndActions();
+#if defined(RACERS_QUEST)
+	struct MenuKeyMapping {
+		uint32_t command;
+		SDL_Scancode scancode;
+		SDL_Keycode keycode;
+	};
+	static const MenuKeyMapping menuKeys[] = {
+		{RACERS_VR_MENU_UP, SDL_SCANCODE_UP, SDLK_UP},
+		{RACERS_VR_MENU_DOWN, SDL_SCANCODE_DOWN, SDLK_DOWN},
+		{RACERS_VR_MENU_LEFT, SDL_SCANCODE_LEFT, SDLK_LEFT},
+		{RACERS_VR_MENU_RIGHT, SDL_SCANCODE_RIGHT, SDLK_RIGHT},
+		{RACERS_VR_MENU_SELECT, SDL_SCANCODE_RETURN, SDLK_RETURN},
+		{RACERS_VR_MENU_BACK, SDL_SCANCODE_ESCAPE, SDLK_ESCAPE},
+	};
+	uint32_t menuCommands = RacersVr_ConsumeMenuCommands();
+	for (const MenuKeyMapping& menuKey : menuKeys) {
+		if (!(menuCommands & menuKey.command)) {
+			continue;
+		}
+		for (int pressed = 1; pressed >= 0; pressed--) {
+			SDL_Event menuEvent;
+			SDL_zero(menuEvent);
+			menuEvent.type = pressed ? SDL_EVENT_KEY_DOWN : SDL_EVENT_KEY_UP;
+			menuEvent.key.scancode = menuKey.scancode;
+			menuEvent.key.key = menuKey.keycode;
+			menuEvent.key.down = pressed != 0;
+			menuEvent.key.repeat = false;
+			MiniwinApp_PushEvent(menuEvent);
+		}
+	}
+#endif
 	if (RacersVr_ConsumePausePressed()) {
 		for (int pressed = 1; pressed >= 0; pressed--) {
 			SDL_Event pauseEvent;
@@ -582,6 +613,15 @@ LegoS32 Win32GolApp::Tick(GolAppEventHandler* p_eventHandler)
 					}
 				}
 				break;
+#if defined(RACERS_QUEST)
+			case SDL_EVENT_WILL_ENTER_BACKGROUND:
+				// Android may retain window focus while the activity is backgrounded.
+				MiniwinSound_SetSuspended(true);
+				break;
+			case SDL_EVENT_DID_ENTER_FOREGROUND:
+				MiniwinSound_SetSuspended(false);
+				break;
+#endif
 			case SDL_EVENT_WINDOW_FOCUS_LOST:
 				// WM_ACTIVATEAPP(FALSE) equivalent.
 				// [library:openxr] The companion window can lose desktop focus to the

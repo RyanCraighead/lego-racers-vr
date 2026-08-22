@@ -10,8 +10,14 @@
 #include "renderbackend.h"
 
 #include <miniwin/miniwinapp.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+
+#if defined(__ANDROID__)
+extern "C" bool RacersVr_PresentFlatFrame(uint32_t, uint32_t, uint32_t)
+	__attribute__((weak, visibility("default")));
+#endif
 
 static const char* g_vertexShader = R"GLSL(#version 300 es
 precision highp float;
@@ -872,6 +878,16 @@ void MiniwinGles3Backend::Present()
 	g_miniwinStatTexUploadBytes = 0;
 
 	HandleFrameDump();
+
+#if defined(__ANDROID__)
+	// libGolDP may load independently of libmain. Keep this optional reference weak
+	// so non-XR/mobile configurations never acquire a hard runtime dependency.
+	if (RacersVr_PresentFlatFrame != nullptr &&
+		RacersVr_PresentFlatFrame(m_sceneFbo, m_sceneFboW, m_sceneFboH)) {
+		gl.glBindFramebuffer(GL_FRAMEBUFFER, m_sceneFbo);
+		return;
+	}
+#endif
 
 	{
 		int dw = 0;

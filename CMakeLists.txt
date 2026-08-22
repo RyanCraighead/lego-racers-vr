@@ -91,21 +91,24 @@ if (RACERS_WERROR)
 endif()
 
 # --- SDL3 ---
-if (DOWNLOAD_DEPENDENCIES)
-  set(RACERS_SDL3_GIT_REPO "https://github.com/libsdl-org/SDL.git" CACHE STRING "Git repository for SDL3")
-  set(RACERS_SDL3_GIT_TAG "release-3.4.12" CACHE STRING "Git tag for SDL3")
-  set(SDL_TEST_LIBRARY OFF)
-  set(SDL_TESTS OFF)
-  set(SDL_EXAMPLES OFF)
-  FetchContent_Declare(
-    SDL3
-    GIT_REPOSITORY "${RACERS_SDL3_GIT_REPO}"
-    GIT_TAG "${RACERS_SDL3_GIT_TAG}"
-    GIT_SHALLOW TRUE
-  )
-  FetchContent_MakeAvailable(SDL3)
-else()
-  find_package(SDL3 REQUIRED CONFIG)
+# The Quest product adds its pinned SDL checkout before adding the engine.
+if (NOT TARGET SDL3::SDL3)
+  if (DOWNLOAD_DEPENDENCIES)
+    set(RACERS_SDL3_GIT_REPO "https://github.com/libsdl-org/SDL.git" CACHE STRING "Git repository for SDL3")
+    set(RACERS_SDL3_GIT_TAG "release-3.4.12" CACHE STRING "Git tag for SDL3")
+    set(SDL_TEST_LIBRARY OFF)
+    set(SDL_TESTS OFF)
+    set(SDL_EXAMPLES OFF)
+    FetchContent_Declare(
+      SDL3
+      GIT_REPOSITORY "${RACERS_SDL3_GIT_REPO}"
+      GIT_TAG "${RACERS_SDL3_GIT_TAG}"
+      GIT_SHALLOW TRUE
+    )
+    FetchContent_MakeAvailable(SDL3)
+  else()
+    find_package(SDL3 REQUIRED CONFIG)
+  endif()
 endif()
 
 add_subdirectory(3rdparty)
@@ -117,22 +120,22 @@ add_subdirectory(vr)
 # The decompilation project (git remote 'racers') is the source of truth for these
 # directories; every source file participates in the build, so upstream file additions are
 # picked up automatically by the globs below.
-file(GLOB_RECURSE COMMON_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/common/src/*.cpp")
-file(GLOB_RECURSE GOLDP_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/GolDP/src/*.cpp")
-file(GLOB_RECURSE LEGORACERS_SOURCES CONFIGURE_DEPENDS "${CMAKE_SOURCE_DIR}/LEGORacers/src/*.cpp")
+file(GLOB_RECURSE COMMON_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/common/src/*.cpp")
+file(GLOB_RECURSE GOLDP_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/GolDP/src/*.cpp")
+file(GLOB_RECURSE LEGORACERS_SOURCES CONFIGURE_DEPENDS "${PROJECT_SOURCE_DIR}/LEGORacers/src/*.cpp")
 
 # The software rasterizer is hand-written x86 assembly and largely unimplemented in the
 # decompilation; the port is hardware-accelerated only (for now) and never advertises a
 # software device.
 list(REMOVE_ITEM GOLDP_SOURCES
-  "${CMAKE_SOURCE_DIR}/GolDP/src/render/golrasterizers1.cpp"
-  "${CMAKE_SOURCE_DIR}/GolDP/src/render/golrasterizers2.cpp"
-  "${CMAKE_SOURCE_DIR}/GolDP/src/render/golsoftwarerenderer.cpp"
+  "${PROJECT_SOURCE_DIR}/GolDP/src/render/golrasterizers1.cpp"
+  "${PROJECT_SOURCE_DIR}/GolDP/src/render/golrasterizers2.cpp"
+  "${PROJECT_SOURCE_DIR}/GolDP/src/render/golsoftwarerenderer.cpp"
 )
-list(APPEND GOLDP_SOURCES "${CMAKE_SOURCE_DIR}/GolDP/portable/golsoftwarerendererstub.cpp")
+list(APPEND GOLDP_SOURCES "${PROJECT_SOURCE_DIR}/GolDP/portable/golsoftwarerendererstub.cpp")
 
 # COM GUID storage is provided by miniwin.
-list(REMOVE_ITEM LEGORACERS_SOURCES "${CMAKE_SOURCE_DIR}/LEGORacers/src/app/guids.cpp")
+list(REMOVE_ITEM LEGORACERS_SOURCES "${PROJECT_SOURCE_DIR}/LEGORacers/src/app/guids.cpp")
 
 # GolTextureList::LoadTextures and the g_texture*File globals are defined in BOTH the exe (here,
 # LEGORACERS 0x004146a0) and the dll (GolDP goltexturelist.cpp/golimage.cpp, GOLDP 0x1002b890).
@@ -142,7 +145,7 @@ list(REMOVE_ITEM LEGORACERS_SOURCES "${CMAKE_SOURCE_DIR}/LEGORacers/src/app/guid
 # goldp's serve both callers. (A cleaner unification into common/ is blocked by the GolDP copy's
 # dependency on the 3D renderer classes.)
 if (EMSCRIPTEN)
-  list(REMOVE_ITEM LEGORACERS_SOURCES "${CMAKE_SOURCE_DIR}/LEGORacers/src/model/goltexturelist.cpp")
+  list(REMOVE_ITEM LEGORACERS_SOURCES "${PROJECT_SOURCE_DIR}/LEGORacers/src/model/goltexturelist.cpp")
 endif()
 
 # GolDP.dll ("Gol" renderer backend), linked directly instead of LoadLibrary'd.
@@ -179,8 +182,16 @@ set_property(TARGET goldp PROPERTY OUTPUT_NAME "GolDP")
 
 # LEGORacers.exe
 if (RACERS_BUILD_APP)
-  add_executable(legoracers WIN32 ${LEGORACERS_SOURCES} ${COMMON_SOURCES})
+  if (ANDROID)
+    # SDLActivity loads the game entry point from libmain.so.
+    add_library(legoracers SHARED ${LEGORACERS_SOURCES} ${COMMON_SOURCES})
+  else()
+    add_executable(legoracers WIN32 ${LEGORACERS_SOURCES} ${COMMON_SOURCES})
+  endif()
   target_compile_definitions(legoracers PRIVATE BUILDING_LEGORACERS DIRECTINPUT_VERSION=0x500)
+  if (RACERS_QUEST)
+    target_compile_definitions(legoracers PRIVATE RACERS_QUEST)
+  endif()
   target_include_directories(legoracers PRIVATE
     "${PROJECT_SOURCE_DIR}/LEGORacers/include"
     "${PROJECT_SOURCE_DIR}/LEGORacers"
@@ -197,14 +208,18 @@ if (RACERS_BUILD_APP)
   # the decomp code. Scoped to these targets: C libraries must not see its C++
   # macros.
   if (CMAKE_CXX_COMPILER_ID MATCHES "Clang|GNU")
-    target_compile_options(legoracers PRIVATE -include "${CMAKE_SOURCE_DIR}/util/compat.h")
-    target_compile_options(goldp PRIVATE -include "${CMAKE_SOURCE_DIR}/util/compat.h")
+    target_compile_options(legoracers PRIVATE -include "${PROJECT_SOURCE_DIR}/util/compat.h")
+    target_compile_options(goldp PRIVATE -include "${PROJECT_SOURCE_DIR}/util/compat.h")
   endif()
   if (WIN32)
     target_sources(legoracers PRIVATE LEGORacers/racers.rc)
     set_property(SOURCE LEGORacers/racers.rc APPEND PROPERTY OBJECT_DEPENDS "${PROJECT_SOURCE_DIR}/LEGORacers/resources/racers.ico")
   endif()
-  set_property(TARGET legoracers PROPERTY OUTPUT_NAME "LEGORacers")
+  if (ANDROID)
+    set_property(TARGET legoracers PROPERTY OUTPUT_NAME "main")
+  else()
+    set_property(TARGET legoracers PROPERTY OUTPUT_NAME "LEGORacers")
+  endif()
 
   if (EMSCRIPTEN)
     # Web build: stream game data (WASMFS fetch) + persist saves (OPFS), emit an HTML shell
@@ -219,8 +234,8 @@ if (RACERS_BUILD_APP)
     target_compile_definitions(legoracers PRIVATE BUILDING_GOL)
     target_compile_definitions(legoracers PRIVATE "RACERS_EMSCRIPTEN_HOST=\"${RACERS_EMSCRIPTEN_HOST}\"")
     set_property(TARGET legoracers PROPERTY SUFFIX ".html")
-    target_link_options(legoracers PRIVATE "SHELL:--shell-file ${CMAKE_SOURCE_DIR}/LEGORacers/emscripten/shell.html")
-    set_property(TARGET legoracers APPEND PROPERTY LINK_DEPENDS "${CMAKE_SOURCE_DIR}/LEGORacers/emscripten/shell.html")
+    target_link_options(legoracers PRIVATE "SHELL:--shell-file ${PROJECT_SOURCE_DIR}/LEGORacers/emscripten/shell.html")
+    set_property(TARGET legoracers APPEND PROPERTY LINK_DEPENDS "${PROJECT_SOURCE_DIR}/LEGORacers/emscripten/shell.html")
   endif()
 endif()
 
