@@ -119,7 +119,7 @@ With the Visual Studio configuration above, launch the built application with:
 
 ## Credits and licensing
 
-PC VR adaptation by **Ryan Craighead**.
+
 
 This mod builds on [racers-portable](https://github.com/isledecomp/racers-portable) and the [LEGO Racers decompilation project](https://github.com/isledecomp/racers). Their engine and portability work make this adaptation possible. The project also uses SDL3, OpenXR, miniaudio, and the existing vendored video-decoding components.
 
